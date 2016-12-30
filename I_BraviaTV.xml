@@ -1,0 +1,86 @@
+<?xml version="1.0"?>
+
+<implementation>
+    <functions>
+        local systemUrl
+        local pass
+
+        function setup (lul_device)
+            luup.log("ip address=" .. luup.devices[lul_device].ip)
+            systemUrl = "http://" .. luup.devices[lul_device].ip .. "/sony/system"
+            pass, tstamp = luup.variable_get("urn:upnp-org:serviceId:SwitchPower1", "pass", lul_device)
+            if not pass
+            then
+                pass = 'secret11'
+                luup.variable_set("urn:upnp-org:serviceId:SwitchPower1", "pass", pass, lul_device)
+            end
+            luup.log("password='" .. pass .. "'")
+        end
+    </functions>
+    <startup>setup</startup>
+    <actionList>
+        <action>
+            <serviceId>urn:upnp-org:serviceId:SwitchPower1</serviceId>
+            <name>SetTarget</name>
+            <run>
+                luup.log("set target called password='" .. pass .. "'")
+
+                luup.variable_set("urn:upnp-org:serviceId:SwitchPower1", "Target", lul_settings.newTargetValue, lul_device)
+                luup.variable_set("urn:upnp-org:serviceId:SwitchPower1", "Status", lul_settings.newTargetValue, lul_device)
+
+                local http = require("socket.http")
+                local ltn12 = require("ltn12")
+
+                http.TIMEOUT = 5
+                local tvstatus = lul_settings.newTargetValue == "0"  and 'false' or 'true'
+                local reqbody='{"id": 2, "method": "setPowerStatus", "version": "1.0", "params": [{ "status": '  ..  tvstatus .. ' }]}'
+
+                result, status = http.request {
+                    url = systemUrl,
+                    method = 'POST',
+                    headers = { ["X-Auth-PSK"] = pass,  ["content-length"] = string.len(reqbody) },
+                    source = ltn12.source.string(reqbody)
+                }
+
+            </run>
+        </action>
+        <action>
+            <serviceId>urn:upnp-org:serviceId:SwitchPower1</serviceId>
+            <name>GetTarget</name>
+            <run>
+                luup.log('get target called')
+            </run>
+        </action>
+        <action>
+            <serviceId>urn:upnp-org:serviceId:SwitchPower1</serviceId>
+            <name>GetStatus</name>
+            <run>
+                luup.log('get status called')
+
+                local http = require("socket.http")
+                local ltn12 = require("ltn12")
+                http.TIMEOUT = 5
+                local reqbody='{"method":"getPowerStatus","params":[],"id":1,"version":"1.0"}'
+                local response_body = {}
+
+                result, status = http.request {
+                    url = systemUrl,
+                    method = 'POST',
+                    headers = { ["X-Auth-PSK"] = pass,  ["content-length"] = string.len(reqbody) },
+                    source = ltn12.source.string(reqbody),
+                    sink = ltn12.sink.table(response_body)
+                }
+                if string.find(table.concat(response_body), 'standby')
+                then
+                    luup.log ("TV is OFF")
+                    luup.variable_set("urn:upnp-org:serviceId:SwitchPower1", "Status", false, lul_device)
+                    return false
+                else
+                    luup.log ("TV is ON")
+                    luup.variable_set("urn:upnp-org:serviceId:SwitchPower1", "Status", true, lul_device)
+                    return true
+                end
+            </run>
+        </action>
+    </actionList>
+</implementation>
